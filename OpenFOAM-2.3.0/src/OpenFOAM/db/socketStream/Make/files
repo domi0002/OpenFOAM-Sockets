@@ -1,3 +1,0 @@
-socketFoam.C
-
-LIB = $(FOAM_USER_LIBBIN)/libSocketFoam
