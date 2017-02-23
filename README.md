@@ -1,11 +1,11 @@
-#----------------------------------------------------------------------#
-#                                                                      #
-#   A Library to Exchange Boundary Conditions via Sockets in OpenFOAM  #
-#                                                                      #
-#----------------------------------------------------------------------#
-# Blame : Dominic Chandar
-# dominic.chandar@gmail.com
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^
+----------------------------------------------------------------------
+                                                                      
+   A Library to Exchange Boundary Conditions via Sockets in OpenFOAM  
+                                                                      
+----------------------------------------------------------------------
+ Blame : Dominic Chandar
+ dominic.chandar@gmail.com
+
 
 
 
