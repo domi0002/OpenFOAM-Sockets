@@ -1,0 +1,8 @@
+# clean socket library
+(cd OpenFOAM/db/socketStream && wclean)
+
+# clean boundary conditions
+(cd finiteVolume/fields/fvPatchFields/derived/socketFvPatchField && wclean)
+
+(cd finiteVolume/fields/fvPatchFields/derived/socketFvPatchFieldV && wclean)
+

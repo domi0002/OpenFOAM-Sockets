@@ -1,0 +1,340 @@
+/*---------------------------------------------------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | Copyright (C) 2011-2014 OpenFOAM Foundation
+     \\/     M anipulation  |
+-------------------------------------------------------------------------------
+License
+    This file is part of OpenFOAM.
+
+    OpenFOAM is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    OpenFOAM is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+    for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with OpenFOAM.  If not, see <http://www.gnu.org/licenses/>.
+
+\*---------------------------------------------------------------------------*/
+
+
+#include "socketFvPatchField.H"
+#include "volMesh.H"
+#include "addToRunTimeSelectionTable.H"
+#include "fvPatchFieldMapper.H"
+#include "surfaceFields.H"
+#include "dictionary.H"
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+namespace Foam
+{
+
+// * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
+//makePatchTypeFieldTypedefs(socket);
+
+
+
+socketFvPatchField::socketFvPatchField
+(
+    const fvPatch& p,
+    const DimensionedField<scalar, volMesh>& iF
+)
+:
+    fixedValueFvPatchField<scalar>(p, iF),
+    socketCall(1)
+{}
+
+
+
+
+socketFvPatchField::socketFvPatchField
+(
+    const socketFvPatchField& ptf,
+    const fvPatch& p,
+    const DimensionedField<scalar, volMesh>& iF,
+    const fvPatchFieldMapper& mapper
+)
+:
+    fixedValueFvPatchField<scalar>(ptf, p, iF, mapper),
+    socketCall(ptf.socketCall),
+    serverPort(ptf.serverPort),
+    serverAddress(ptf.serverAddress),
+    communicationMode(ptf.communicationMode),
+    sendSize(ptf.sendSize)
+{
+    if (&iF && mapper.hasUnmapped())
+    {
+        WarningIn
+        (
+            "socketFvPatchField::socketFvPatchField\n"
+            "(\n"
+            "    const socketFvPatchField&,\n"
+            "    const fvPatch&,\n"
+            "    const DimensionedField<scalar, volMesh>&,\n"
+            "    const fvPatchFieldMapper&\n"
+            ")\n"
+        )   << "On field " << iF.name() << " patch " << p.name()
+            << " patchField " << this->type()
+            << " : mapper does not map all values." << nl
+            << "    To avoid this warning fully specify the mapping in derived"
+            << " patch fields." << endl;
+    }
+}
+
+
+
+socketFvPatchField::socketFvPatchField
+(
+    const fvPatch& p,
+    const DimensionedField<scalar, volMesh>& iF,
+    const dictionary& dict
+)
+:
+    fixedValueFvPatchField<scalar>(p, iF, dict),
+    socketCall(1)
+{
+ //   evaluate();
+    fvPatchScalarField::operator=( scalarField("value",dict,p.size()) );
+    dict.lookup("server") >> serverAddress;
+    dict.lookup("port") >> serverPort;
+    dict.lookup("communicationMode") >> communicationMode ;
+
+    if (!Pstream::parRun() || communicationMode == "master")
+    {
+        Info << " Server = " << serverAddress << endl;
+        Info << " Port   = " << serverPort << endl ;
+    }
+    else
+    { 
+        serverPort+=Pstream::myProcNo();
+        Pout << " Server = " << serverAddress << endl;
+        Pout << " Port   = " << serverPort << endl ;
+    }
+
+    //Attempt to connect to Server
+    //client = new socketFoam(serverAddress.c_str(),serverPort,::Client);
+   
+    //client.set(serverAddress.c_str(),serverPort,::Client);
+
+    //Send to the server the size of this patch
+    sendSize = this->size();
+
+    if (communicationMode == "master")
+    {
+        reduce(sendSize,sumOp<label>());
+	Info <<" Send Size from OpenFOAM = " << sendSize << endl;    
+        if ( Pstream::master() )
+	{
+	    client.set(serverAddress.c_str(),serverPort,::Client);
+            label ierr = client.send(&sendSize,1); client.Check(ierr);
+	}
+    }
+    else
+    {
+	client.set(serverAddress.c_str(),serverPort,::Client);
+        label ierr = client.send(&sendSize,1); client.Check(ierr);
+    }
+
+}
+
+
+
+socketFvPatchField::socketFvPatchField
+(
+    const socketFvPatchField& ptf
+)
+:
+    fixedValueFvPatchField<scalar>(ptf),
+    socketCall(ptf.socketCall),
+    serverPort(ptf.serverPort),
+    serverAddress(ptf.serverAddress),
+    communicationMode(ptf.communicationMode),
+    sendSize(ptf.sendSize)
+{}
+
+
+
+socketFvPatchField::socketFvPatchField
+(
+    const socketFvPatchField& ptf,
+    const DimensionedField<scalar, volMesh>& iF
+)
+:
+    fixedValueFvPatchField<scalar>(ptf, iF),
+    socketCall(ptf.socketCall),
+    serverPort(ptf.serverPort),
+    serverAddress(ptf.serverAddress),
+    communicationMode(ptf.communicationMode),
+    sendSize(ptf.sendSize)
+{}
+
+
+// * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
+
+
+void socketFvPatchField::autoMap
+(
+    const fvPatchFieldMapper& m
+)
+{
+    fixedValueFvPatchField<scalar>::autoMap(m);
+}
+
+
+void socketFvPatchField::updateCoeffs()
+{
+   if ( updated() )
+   {
+	return ;
+   }
+
+    // Always send indefinitely.
+    int continueSending = 1;
+
+    // Send over the patch values
+    //int sendSize = this->size();
+
+    //if (sendSize == 0)
+    //continueSending = 0;
+
+
+    int ierr=1;
+
+    
+    scalarField test;//(this->patchInternalField());
+    
+    //ierr = client->send(test.begin(),sendSize); client->Check(ierr);
+    //ierr = client->send(gradient_.begin(),sendSize); client->Check(ierr);
+    //ierr = client->send(this->patch().deltaCoeffs().begin(),sendSize); client->Check(ierr);
+
+
+    if ( communicationMode == "master" && Pstream::parRun() )
+    {
+        test.resize(sendSize);
+	test=0.0;
+
+	// Send face Centers to Server
+	// vectorField of the face centers local to this processor
+	vectorField fc(this->patch().patch().faceCentres());
+	// Just the Y-coordinate of the local face centres
+	scalarField yc(fc.component(1));
+	
+	// An Empty List of the gathered y coordinate
+	List<scalarField> ycGathered(Pstream::nProcs());
+
+	// Plugin at desired locations
+	ycGathered[Pstream::myProcNo()]=yc;
+
+	// Gather the list on the master
+	Pstream::gatherList(ycGathered);
+
+	// Combine the list and send over to server
+	if ( Pstream::master() )
+	{
+	    scalarField  ycGatheredCombined
+	    (
+		ListListOps::combine<scalarField>
+		(
+		    ycGathered,
+		    accessOp<scalarField>()				
+		)
+	    );
+
+	    ierr = client.send(&continueSending,1);
+	    client.Check(ierr);
+	    Info << "continueSending Send length = " << ierr/4 << endl;	
+	    //sleep(2);
+
+	    //Info << test << endl; 
+	    ierr = client.send(ycGatheredCombined.begin(),sendSize); 
+	    client.Check(ierr);
+	    //Info << "yc Send length = " << ierr/8 << endl;	
+
+	    ierr = client.recv(test.begin(),sendSize);
+	    client.Check(ierr);
+	    //Info << "test recv length = " << ierr/8 << endl;	
+	}
+
+	//Pout<< "y face Center size = " << yc.size() << endl;
+	
+
+        //scalarField testLocal(this->size());
+        if ( Pstream::master() )
+        {
+            //test.resize(sendSize);
+            //ierr = client.recv(test.begin(),sendSize); client.Check(ierr);
+        }
+        
+        Pstream::scatter(test); 
+        test.resize(this->size());     
+
+    }
+    else
+    {
+	ierr = client.send(&continueSending,1);
+        test.resize(this->size());
+        ierr = client.recv(test.begin(),sendSize); client.Check(ierr);
+    }
+
+    
+    operator==
+    (
+        test
+    );
+
+    socketCall++;
+
+    fixedValueFvPatchScalarField::updateCoeffs();
+}
+
+
+
+
+void socketFvPatchField::write(Ostream& os) const
+{
+    fvPatchField<scalar>::write(os);
+
+    
+    os.writeKeyword("server") << serverAddress << token::END_STATEMENT << nl ;
+    os.writeKeyword("port") <<   serverPort << token::END_STATEMENT << nl ;
+    os.writeKeyword("communicationMode") << communicationMode << token::END_STATEMENT << nl;
+    this->writeEntry("value",os);
+
+}
+
+
+socketFvPatchField::~socketFvPatchField()
+{
+    int continueSending = 0;
+
+    if ( Pstream::parRun() && communicationMode == "master")
+    {
+	if ( Pstream::master() )
+	{
+	    client.send(&continueSending,1);
+            client.Finalize();
+	}
+    }
+    else
+    {
+        client.send(&continueSending,1);
+	client.Finalize();
+    }
+}
+
+
+makePatchTypeField(fvPatchScalarField,socketFvPatchField);
+
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+} // End namespace Foam
+
+// ************************************************************************* //
